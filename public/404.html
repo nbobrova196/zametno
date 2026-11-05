@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <title>Заметно</title>
+    <script>
+      // GitHub Pages не знает про клиентские маршруты. Сохраняем путь и
+      // отправляем на index.html, чтобы прямые ссылки и перезагрузка работали.
+      ;(function () {
+        var segmentCount = 1
+        var l = window.location
+        var parts = l.pathname.split('/').filter(Boolean)
+        var rest = parts.slice(segmentCount).join('/')
+        var query = l.search ? l.search.slice(1) : ''
+        var target =
+          l.protocol +
+          '//' +
+          l.hostname +
+          (l.port ? ':' + l.port : '') +
+          '/' +
+          parts.slice(0, segmentCount).join('/') +
+          '/?/' +
+          rest +
+          (query ? '&' + query : '')
+        l.replace(target + l.hash)
+      })()
+    </script>
+  </head>
+  <body></body>
+</html>

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#1f5f4f" />
+    <meta
+      name="description"
+      content="Заметно — дневник наблюдений: фото, заметки, измерения и сравнение изменений."
+    />
+    <link rel="icon" type="image/png" href="/icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <title>Заметно — дневник наблюдений</title>
+    <script>
+      // Возвращаем адрес после переадресации через 404.html на GitHub Pages.
+      ;(function () {
+        var l = window.location
+        if (l.search[1] !== '/') return
+        var decoded = l.search
+          .slice(1)
+          .split('&')
+          .map(function (part) {
+            return part.replace(/~and~/g, '&')
+          })
+          .join('?')
+        var path = decoded.replace(/^\//, '')
+        window.history.replaceState(
+          null,
+          '',
+          l.pathname.replace(/\/$/, '') + '/' + path + l.hash,
+        )
+      })()
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
