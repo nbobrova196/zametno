@@ -28,13 +28,13 @@ npm run build
 
 ## Публикация
 
-При push в `main` GitHub Actions собирает приложение и публикует его на GitHub Pages:
+При push в `main` GitHub Actions собирает приложение и обновляет ветку `gh-pages`:
 
 **https://nbobrova196.github.io/zametno/**
 
 Сборка для GitHub Pages запускается с `--mode github`, чтобы адреса ресурсов и маршруты начинались с `/zametno/`.
 
-Если первый деплой не запустился, открой в репозитории **Settings → Pages** и выбери источник **GitHub Actions**, затем перезапусти workflow.
+Если сайт ещё не открывается, открой в репозитории **Settings → Pages** и выбери источник **Deploy from a branch**, ветку **gh-pages**, папку **/ (root)**, затем нажми **Save**.
 
 ## Установка
 
