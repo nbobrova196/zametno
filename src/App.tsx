@@ -1,6 +1,7 @@
-import { Suspense, lazy } from 'react'
+import { Suspense, lazy, useEffect } from 'react'
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { AppShell } from './components/AppShell'
+import { ensurePersistentStorage } from './lib/storage'
 import { InstallScreen } from './screens/InstallScreen'
 import { NotFoundScreen } from './screens/NotFoundScreen'
 import { ShelfScreen } from './screens/ShelfScreen'
@@ -56,6 +57,15 @@ function RouteFallback() {
 export function App() {
   const base = import.meta.env.BASE_URL.replace(/\/$/, '')
 
+  useEffect(() => {
+    void ensurePersistentStorage()
+    const handleInstalled = () => {
+      void ensurePersistentStorage(true)
+    }
+    window.addEventListener('appinstalled', handleInstalled)
+    return () => window.removeEventListener('appinstalled', handleInstalled)
+  }, [])
+
   return (
     <BrowserRouter basename={base || '/'}>
       <AppShell>
@@ -69,6 +79,7 @@ export function App() {
             <Route path="/p/:projectId" element={<ProjectLayout />}>
               <Route index element={<ProjectScreen />} />
               <Route path="add" element={<NewObservationScreen />} />
+              <Route path="edit/:observationId" element={<NewObservationScreen />} />
               <Route path="history" element={<HistoryScreen />} />
               <Route path="compare" element={<CompareScreen />} />
               <Route path="reminders" element={<RemindersScreen />} />

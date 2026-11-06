@@ -3,8 +3,15 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { deleteProjectCascade } from '../db/db'
 import type { ProjectMode } from '../db/types'
 import { updateProject } from '../domain/projects'
+import { getLastBackupAt, markBackupDone, isBackupStale, daysSinceBackup } from '../lib/backup'
+import { daysWord, formatFull } from '../lib/format'
 import { formatBytes } from '../lib/photos'
-import { getStorageInfo, requestPersistentStorage, type StorageInfo } from '../lib/storage'
+import {
+  ensurePersistentStorage,
+  getStorageInfo,
+  requestPersistentStorage,
+  type StorageInfo,
+} from '../lib/storage'
 import { useProject } from '../lib/useProject'
 import { Button, Badge, Card, Field, Input, Textarea, cn } from '../components/ui'
 
@@ -44,10 +51,23 @@ export function SettingsScreen() {
   const [storage, setStorage] = useState<StorageInfo | null>()
   const [protecting, setProtecting] = useState(false)
   const [protectMessage, setProtectMessage] = useState('')
+  const [lastBackupAt, setLastBackupAt] = useState<number | null>(null)
 
   useEffect(() => {
-    void getStorageInfo().then(setStorage)
+    let active = true
+    void ensurePersistentStorage()
+      .then(() => getStorageInfo())
+      .then((info) => {
+        if (active) setStorage(info)
+      })
+    return () => {
+      active = false
+    }
   }, [])
+
+  useEffect(() => {
+    if (projectId) setLastBackupAt(getLastBackupAt(projectId))
+  }, [projectId])
 
   useEffect(() => {
     if (!project || loaded) return
@@ -105,6 +125,8 @@ export function SettingsScreen() {
       const { downloadBlob, exportProjectArchive } = await import('../domain/archive')
       const { blob, filename } = await exportProjectArchive(projectId)
       downloadBlob(blob, filename)
+      markBackupDone(projectId)
+      setLastBackupAt(Date.now())
       setArchiveMessage(`Архив «${filename}» скачан. Сохрани его как резервную копию.`)
     } catch {
       setArchiveError('Не получилось собрать архив. Попробуй ещё раз.')
@@ -295,6 +317,26 @@ export function SettingsScreen() {
           Один файл со всеми записями, фотографиями, измерениями и расписанием. Пригодится как
           резервная копия или чтобы перенести проект на другое устройство.
         </p>
+        <div className="rounded-xl border border-line bg-paper px-4 py-3 text-sm leading-relaxed text-muted">
+          {lastBackupAt ? (
+            <>
+              Последняя копия: {formatFull(lastBackupAt)}.
+              {isBackupStale(lastBackupAt) ? (
+                <span className="mt-1 block text-amber-600">
+                  Прошло {daysSinceBackup(lastBackupAt)} {daysWord(daysSinceBackup(lastBackupAt))} —
+                  пора скачать свежий архив.
+                </span>
+              ) : (
+                <span className="mt-1 block">Копия свежая: данные можно восстановить.</span>
+              )}
+            </>
+          ) : (
+            <>
+              Резервной копии ещё не было. Скачай архив: если браузер очистит данные, проект можно
+              будет восстановить только из него.
+            </>
+          )}
+        </div>
         <Button variant="secondary" onClick={handleExportArchive} disabled={archiveBusy}>
           {archiveBusy ? 'Собираю архив…' : 'Скачать архив'}
         </Button>
@@ -324,6 +366,10 @@ export function SettingsScreen() {
         <p className="text-sm leading-relaxed text-muted">
           Фотографии и записи занимают место в браузере. Если браузеру не хватит места, новые
           фотографии могут не сохраниться — тогда освободи место или скачай архив.
+        </p>
+        <p className="text-sm leading-relaxed text-muted">
+          Заметно просит браузер защитить данные автоматически — при запуске и после установки. Если
+          браузер не подтвердил защиту, можно попробовать вручную.
         </p>
 
         {storage === undefined ? (
@@ -367,7 +413,12 @@ export function SettingsScreen() {
               <Button variant="secondary" onClick={handleProtect} disabled={protecting}>
                 {protecting ? 'Запрашиваю…' : 'Защитить данные от очистки'}
               </Button>
-            ) : null}
+            ) : (
+              <p className="rounded-xl border border-forest-100 bg-forest-50 px-4 py-3 text-sm leading-relaxed text-forest-700">
+                Защита включена: браузер считает данные постоянными и не станет удалять их
+                автоматически при нехватке места.
+              </p>
+            )}
             {protectMessage ? (
               <p className="rounded-xl border border-line bg-paper px-4 py-3 text-sm leading-relaxed text-muted" role="status">
                 {protectMessage}

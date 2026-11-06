@@ -104,7 +104,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function parseManifest(raw: string): ArchiveManifest {
   const data: unknown = JSON.parse(raw)
   if (!isRecord(data)) throw new Error('Архив повреждён: нет описания проекта')
-  if (data.app !== 'zametno' || data.version !== ARCHIVE_VERSION) {
+  if (
+    data.app !== 'zametno' ||
+    typeof data.version !== 'number' ||
+    data.version < 1 ||
+    data.version > ARCHIVE_VERSION
+  ) {
     throw new Error('Это архив другой версии или другого приложения')
   }
   if (!isRecord(data.project) || typeof data.project.title !== 'string') {

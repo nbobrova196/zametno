@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import type { Mark, Metric, Observation, Photo } from '../db/types'
 import { dayLabel, formatNumber, formatTime } from '../lib/format'
 import { PhotoImage } from './PhotoImage'
@@ -15,17 +16,20 @@ export function ObservationCard({
   photos,
   marks,
   metrics,
+  actions,
 }: {
   observation: Observation
   photos: Photo[]
   marks: Mark[]
   metrics: Metric[]
+  actions?: ReactNode
 }) {
   const marksById = new Map(marks.map((mark) => [mark.id, mark]))
   const metricsById = new Map(metrics.map((metric) => [metric.id, metric]))
   const label = kindLabel[observation.kind]
+  const visiblePhotos = observation.kind === 'skipped' ? [] : photos
   const hasBody =
-    photos.length > 0 ||
+    visiblePhotos.length > 0 ||
     Boolean(observation.note) ||
     observation.markIds.length > 0 ||
     observation.measurements.length > 0
@@ -45,9 +49,9 @@ export function ObservationCard({
 
       {hasBody ? (
         <div className="space-y-3 px-4 py-4">
-          {photos.length > 0 ? (
+          {visiblePhotos.length > 0 ? (
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-              {photos.slice(0, 4).map((photo) => (
+              {visiblePhotos.slice(0, 4).map((photo) => (
                 <PhotoImage
                   key={photo.id}
                   photo={photo}
@@ -89,6 +93,12 @@ export function ObservationCard({
           Запись без подробностей — главное, что день отмечен.
         </div>
       )}
+
+      {actions ? (
+        <div className="flex flex-wrap items-center gap-2 border-t border-line px-4 py-2.5">
+          {actions}
+        </div>
+      ) : null}
     </Card>
   )
 }

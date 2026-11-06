@@ -6,6 +6,7 @@ import type { Mark, Metric, Observation, Photo } from '../db/types'
 import { listObservations } from '../domain/observations'
 import { dayKey, dayLabel } from '../lib/format'
 import { ObservationCard } from '../components/ObservationCard'
+import { ObservationActions } from '../components/ObservationActions'
 import { EmptyState, buttonStyles, cn } from '../components/ui'
 
 export function HistoryScreen() {
@@ -123,6 +124,12 @@ export function HistoryScreen() {
                     photos={photosByObservation.get(observation.id) ?? []}
                     marks={marks}
                     metrics={metrics}
+                    actions={
+                      <ObservationActions
+                        projectId={projectId}
+                        observationId={observation.id}
+                      />
+                    }
                   />
                 ))}
               </div>

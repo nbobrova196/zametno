@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Link, useParams } from 'react-router-dom'
 import { db } from '../db/db'
@@ -5,9 +6,11 @@ import type { Mark, Metric, Observation, Photo, Reminder, ReminderLog } from '..
 import { listObservations } from '../domain/observations'
 import { listReminders } from '../domain/reminderActions'
 import { reminderDone, remindersForDate, todayKey } from '../domain/reminders'
+import { getLastBackupAt, isBackupStale, daysSinceBackup } from '../lib/backup'
 import { importantEventsWord, daysAgo, daysWord, observationsWord } from '../lib/format'
 import { useProject } from '../lib/useProject'
 import { ObservationCard } from '../components/ObservationCard'
+import { ObservationActions } from '../components/ObservationActions'
 import { Badge, EmptyState, buttonStyles, Card, Stat } from '../components/ui'
 
 export function ProjectScreen() {
@@ -45,7 +48,14 @@ export function ProjectScreen() {
     [],
   )
 
+  const [lastBackupAt, setLastBackupAt] = useState<number | null>(null)
+  useEffect(() => {
+    if (projectId) setLastBackupAt(getLastBackupAt(projectId))
+  }, [projectId])
+
   if (!project || !projectId) return null
+
+  const backupStale = observations.length > 0 && isBackupStale(lastBackupAt)
 
   const counted = observations.filter((observation) => observation.kind !== 'skipped')
   const important = observations.filter((observation) => observation.isImportant)
@@ -66,6 +76,31 @@ export function ProjectScreen() {
         <Stat value={days} label={daysWord(days)} />
         <Stat value={important.length} label={importantEventsWord(important.length)} />
       </div>
+
+      {backupStale ? (
+        <Card className="border-amber-200 bg-amber-100/50 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="font-display text-lg text-ink">Пора сохранить копию</h2>
+              <p className="mt-0.5 text-sm leading-relaxed text-muted">
+                {lastBackupAt
+                  ? `Последний архив — ${daysSinceBackup(lastBackupAt)} ${daysWord(
+                      daysSinceBackup(lastBackupAt),
+                    )} назад. `
+                  : 'Резервной копии ещё не было. '}
+                Скачай ZIP в настройках: если браузер очистит данные, проект можно будет
+                восстановить только из архива.
+              </p>
+            </div>
+            <Link
+              to={`/p/${projectId}/settings`}
+              className={buttonStyles('secondary', 'sm')}
+            >
+              К архиву
+            </Link>
+          </div>
+        </Card>
+      ) : null}
 
       {project.status === 'active' && todayTasks.length > 0 ? (
         <Card className="space-y-3 p-4">
@@ -162,6 +197,12 @@ export function ProjectScreen() {
                   photos={photosByObservation.get(observation.id) ?? []}
                   marks={marks}
                   metrics={metrics}
+                  actions={
+                    <ObservationActions
+                      projectId={projectId}
+                      observationId={observation.id}
+                    />
+                  }
                 />
               ))}
             </div>

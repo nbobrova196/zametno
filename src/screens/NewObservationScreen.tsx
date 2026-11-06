@@ -2,12 +2,14 @@ import { useEffect, useMemo, useState, type ChangeEvent } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { db } from '../db/db'
-import type { Mark, Metric, ObservationKind } from '../db/types'
-import { listObservations, saveObservation } from '../domain/observations'
+import type { Mark, Metric, Observation, ObservationKind, Photo } from '../db/types'
+import { listObservations, saveObservation, updateObservation } from '../domain/observations'
 import { completeReminder } from '../domain/reminderActions'
 import { parseMeasurement } from '../domain/measurements'
 import { formatNumber } from '../lib/format'
+import { getStorageInfo, storageErrorMessage } from '../lib/storage'
 import { useProject } from '../lib/useProject'
+import { PhotoImage } from '../components/PhotoImage'
 import { Button, Card, Field, Input, Textarea, cn } from '../components/ui'
 
 const kinds: Array<{ id: ObservationKind; title: string; hint: string }> = [
@@ -23,12 +25,13 @@ function toLocalInput(timestamp: number) {
 }
 
 export function NewObservationScreen() {
-  const { projectId } = useParams()
+  const { projectId, observationId } = useParams()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const project = useProject(projectId)
   const reminderId = searchParams.get('reminder')
   const reminderDate = searchParams.get('date')
+  const editing = Boolean(observationId)
 
   const metrics = useLiveQuery(
     () => (projectId ? db.metrics.where('projectId').equals(projectId).toArray() : Promise.resolve([] as Metric[])),
@@ -40,9 +43,29 @@ export function NewObservationScreen() {
     [projectId],
     [],
   )
-  const lastObservation = useLiveQuery(
-    () => (projectId ? listObservations(projectId).then((items) => items[0]) : Promise.resolve(undefined)),
-    [projectId],
+  const previousObservation = useLiveQuery(
+    () =>
+      projectId
+        ? listObservations(projectId).then((items) =>
+            items.find((item) => item.id !== observationId),
+          )
+        : Promise.resolve(undefined),
+    [projectId, observationId],
+  )
+  const existing = useLiveQuery<Observation | null>(
+    async () => {
+      if (!observationId) return null
+      return (await db.observations.get(observationId)) ?? null
+    },
+    [observationId],
+  )
+  const existingPhotos = useLiveQuery(
+    () =>
+      observationId
+        ? db.photos.where('observationId').equals(observationId).toArray()
+        : Promise.resolve([] as Photo[]),
+    [observationId],
+    [],
   )
 
   const [kind, setKind] = useState<ObservationKind>('observation')
@@ -52,7 +75,9 @@ export function NewObservationScreen() {
   const [values, setValues] = useState<Record<string, string>>({})
   const [important, setImportant] = useState(false)
   const [files, setFiles] = useState<File[]>([])
+  const [removedPhotoIds, setRemovedPhotoIds] = useState<string[]>([])
   const [previews, setPreviews] = useState<string[]>([])
+  const [loaded, setLoaded] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -62,13 +87,56 @@ export function NewObservationScreen() {
     return () => urls.forEach((url) => URL.revokeObjectURL(url))
   }, [files])
 
+  useEffect(() => {
+    if (!observationId || !existing || loaded) return
+    setKind(existing.kind === 'care' ? 'observation' : existing.kind)
+    setObservedAt(toLocalInput(existing.observedAt))
+    setNote(existing.note ?? '')
+    setSelectedMarks(existing.markIds)
+    setValues(
+      Object.fromEntries(existing.measurements.map((measurement) => [measurement.metricId, String(measurement.value)])),
+    )
+    setImportant(existing.isImportant)
+    setLoaded(true)
+  }, [observationId, existing, loaded])
+
   const previousValues = useMemo(() => {
     const map = new Map<string, number>()
-    for (const measurement of lastObservation?.measurements ?? []) {
+    for (const measurement of previousObservation?.measurements ?? []) {
       map.set(measurement.metricId, measurement.value)
     }
     return map
-  }, [lastObservation])
+  }, [previousObservation])
+
+  const removed = new Set(removedPhotoIds)
+  const visibleExistingPhotos = existingPhotos.filter((photo) => !removed.has(photo.id))
+
+  if (observationId && existing === null) {
+    return (
+      <Card className="mx-auto max-w-3xl p-8 text-center">
+        <p className="text-3xl" aria-hidden="true">🫥</p>
+        <h1 className="mt-3 font-display text-2xl text-ink">Запись не найдена</h1>
+        <p className="mt-2 text-sm text-muted">Возможно, её уже удалили.</p>
+        <Link
+          to={`/p/${projectId}/history`}
+          className="mt-5 inline-block text-sm font-medium text-forest-700 underline decoration-forest-200 underline-offset-4"
+        >
+          К истории наблюдений
+        </Link>
+      </Card>
+    )
+  }
+
+  if (observationId && (existing === undefined || !loaded)) {
+    return (
+      <div className="mx-auto max-w-3xl space-y-4" aria-busy="true">
+        <div className="h-4 w-40 animate-pulse rounded bg-line" />
+        <div className="h-9 w-72 animate-pulse rounded-lg bg-line" />
+        <div className="h-40 animate-pulse rounded-2xl bg-line" />
+        <div className="h-56 animate-pulse rounded-2xl bg-line" />
+      </div>
+    )
+  }
 
   if (!project || !projectId) return null
 
@@ -84,6 +152,10 @@ export function NewObservationScreen() {
     setFiles((current) => current.filter((_, i) => i !== index))
   }
 
+  function removeExistingPhoto(id: string) {
+    setRemovedPhotoIds((current) => [...current, id])
+  }
+
   function toggleMark(markId: string) {
     setSelectedMarks((current) =>
       current.includes(markId) ? current.filter((id) => id !== markId) : [...current, markId],
@@ -95,6 +167,7 @@ export function NewObservationScreen() {
 
     const hasContent =
       files.length > 0 ||
+      visibleExistingPhotos.length > 0 ||
       note.trim().length > 0 ||
       selectedMarks.length > 0 ||
       Object.values(values).some((value) => value.trim() !== '')
@@ -108,8 +181,20 @@ export function NewObservationScreen() {
     setError('')
 
     try {
-      const observationId = await saveObservation({
-        projectId,
+      const filesToSave = isSkipped ? [] : files
+
+      if (filesToSave.length > 0) {
+        const info = await getStorageInfo()
+        if (info && info.quota > 0 && info.quota - info.usage < 5 * 1024 * 1024) {
+          setError(
+            'На устройстве почти не осталось места. Скачай архив проекта и освободи место, чтобы не потерять новые фотографии.',
+          )
+          setSaving(false)
+          return
+        }
+      }
+
+      const payload = {
         kind,
         observedAt: new Date(observedAt).getTime() || Date.now(),
         note,
@@ -119,7 +204,23 @@ export function NewObservationScreen() {
           return value === undefined ? [] : [{ metricId: metric.id, value }]
         }),
         isImportant: important && !isSkipped,
-        files,
+      }
+
+      if (editing && observationId) {
+        await updateObservation({
+          id: observationId,
+          ...payload,
+          files: filesToSave,
+          removedPhotoIds,
+        })
+        navigate(`/p/${projectId}/history`, { replace: true })
+        return
+      }
+
+      const createdId = await saveObservation({
+        projectId,
+        ...payload,
+        files: filesToSave,
       })
 
       if (reminderId && reminderDate && !isSkipped) {
@@ -127,13 +228,20 @@ export function NewObservationScreen() {
           reminderId,
           projectId,
           date: reminderDate,
-          observationId,
+          observationId: createdId,
         })
       }
 
       navigate(reminderId ? '/today' : `/p/${projectId}/history`, { replace: true })
-    } catch {
-      setError('Не получилось сохранить запись. Попробуй ещё раз.')
+    } catch (saveError) {
+      setError(
+        storageErrorMessage(
+          saveError,
+          editing
+            ? 'Не получилось сохранить изменения. Попробуй ещё раз.'
+            : 'Не получилось сохранить запись. Попробуй ещё раз.',
+        ),
+      )
       setSaving(false)
     }
   }
@@ -142,16 +250,18 @@ export function NewObservationScreen() {
     <div className="mx-auto max-w-3xl space-y-5">
       <div className="flex items-center justify-between gap-3">
         <Link
-          to={`/p/${projectId}`}
+          to={editing ? `/p/${projectId}/history` : `/p/${projectId}`}
           className="text-sm font-medium text-forest-700 underline decoration-forest-200 underline-offset-4"
         >
-          ← К проекту
+          ← {editing ? 'К истории' : 'К проекту'}
         </Link>
         <span className="text-xs text-muted">Запись сохранится на этом устройстве</span>
       </div>
 
       <div>
-        <h1 className="font-display text-3xl text-ink">Новое наблюдение</h1>
+        <h1 className="font-display text-3xl text-ink">
+          {editing ? 'Изменить наблюдение' : 'Новое наблюдение'}
+        </h1>
         <p className="mt-1 text-sm text-muted">{project.title}</p>
       </div>
 
@@ -218,8 +328,25 @@ export function NewObservationScreen() {
               <span className="text-xs text-muted">Можно несколько · сжимаются автоматически</span>
             </div>
 
-            {previews.length > 0 ? (
+            {visibleExistingPhotos.length > 0 || previews.length > 0 ? (
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {visibleExistingPhotos.map((photo, index) => (
+                  <div key={photo.id} className="group relative overflow-hidden rounded-xl">
+                    <PhotoImage
+                      photo={photo}
+                      className="aspect-[4/3] w-full object-cover"
+                      alt={`Фото из записи ${index + 1}`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeExistingPhoto(photo.id)}
+                      className="absolute top-1.5 right-1.5 inline-flex min-h-11 items-center rounded-full bg-ink/70 px-3 py-2 text-xs text-white backdrop-blur hover:bg-ink"
+                      aria-label={`Убрать фото ${index + 1} из записи`}
+                    >
+                      Убрать
+                    </button>
+                  </div>
+                ))}
                 {previews.map((url, index) => (
                   <div key={url} className="group relative overflow-hidden rounded-xl">
                     <img
@@ -361,10 +488,16 @@ export function NewObservationScreen() {
 
       <div className="flex flex-wrap items-center gap-3 pb-6">
         <Button size="lg" onClick={handleSave} disabled={saving}>
-          {saving ? 'Сохраняю…' : isSkipped ? 'Отметить пропуск' : 'Сохранить наблюдение'}
+          {saving
+            ? 'Сохраняю…'
+            : editing
+              ? 'Сохранить изменения'
+              : isSkipped
+                ? 'Отметить пропуск'
+                : 'Сохранить наблюдение'}
         </Button>
         <Link
-          to={`/p/${projectId}`}
+          to={editing ? `/p/${projectId}/history` : `/p/${projectId}`}
           className="text-sm font-medium text-forest-700 underline decoration-forest-200 underline-offset-4"
         >
           Отменить
