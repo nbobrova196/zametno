@@ -5,6 +5,7 @@ import { db } from '../db/db'
 import type { Photo, Project } from '../db/types'
 import { getTemplate } from '../domain/templates'
 import { daysAgo, daysWord, observationsWord } from '../lib/format'
+import { markBackupDone } from '../lib/backup'
 import { PhotoImage } from '../components/PhotoImage'
 import { Badge, buttonStyles, Card, EmptyState, PageHeader, cn } from '../components/ui'
 
@@ -24,7 +25,7 @@ function ProjectCard({
   return (
     <Link
       to={`/p/${project.id}`}
-      className="group block rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-forest-400 focus-visible:ring-offset-2"
+      className="group block min-w-0 rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-forest-400 focus-visible:ring-offset-2"
     >
       <Card className="h-full overflow-hidden transition-transform group-hover:-translate-y-0.5">
         <div className="relative h-36 bg-paper">
@@ -48,12 +49,21 @@ function ProjectCard({
 
         <div className="space-y-2 px-4 py-4">
           <div className="flex items-start justify-between gap-2">
-            <h2 className="font-display text-xl leading-snug text-ink">{project.title}</h2>
+            <h2
+              className="line-clamp-3 min-w-0 flex-1 break-words font-display text-xl leading-snug text-ink"
+              title={project.title}
+            >
+              {project.title}
+            </h2>
             {project.mode === 'research' ? <Badge tone="green">Исследование</Badge> : null}
           </div>
-          {project.subjectName ? <p className="text-sm text-muted">{project.subjectName}</p> : null}
+          {project.subjectName ? (
+            <p className="line-clamp-2 break-words text-sm text-muted">{project.subjectName}</p>
+          ) : null}
           {project.question ? (
-            <p className="line-clamp-2 text-sm leading-relaxed text-ink/80">{project.question}</p>
+            <p className="line-clamp-3 break-words text-sm leading-relaxed text-ink/80">
+              {project.question}
+            </p>
           ) : null}
           <div className="flex flex-wrap gap-x-3 gap-y-1 pt-1 text-xs text-muted">
             <span>
@@ -76,7 +86,9 @@ export function ShelfScreen() {
   const observations = useLiveQuery(() => db.observations.toArray(), [], [])
   const photos = useLiveQuery(() => db.photos.toArray(), [], [])
   const [importing, setImporting] = useState(false)
-  const [importError, setImportError] = useState('')
+  const [exporting, setExporting] = useState(false)
+  const [archiveError, setArchiveError] = useState('')
+  const [notice, setNotice] = useState('')
 
   async function handleImport(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
@@ -84,17 +96,48 @@ export function ShelfScreen() {
     if (!file) return
 
     setImporting(true)
-    setImportError('')
+    setArchiveError('')
+    setNotice('')
     try {
-      const { importProjectArchive } = await import('../domain/archive')
-      const projectId = await importProjectArchive(file)
-      navigate(`/p/${projectId}`)
+      const { importArchive } = await import('../domain/archive')
+      const result = await importArchive(file)
+      if (result.bundle) {
+        setNotice(`Импортировано проектов: ${result.projectIds.length}. Они уже на полке.`)
+      } else if (result.projectIds[0]) {
+        navigate(`/p/${result.projectIds[0]}`)
+      }
     } catch (error) {
-      setImportError(
+      setArchiveError(
         error instanceof Error ? error.message : 'Не получилось импортировать архив.',
       )
     } finally {
       setImporting(false)
+    }
+  }
+
+  async function handleExportAll() {
+    if (projects.length === 0) return
+
+    setExporting(true)
+    setArchiveError('')
+    setNotice('')
+    try {
+      const { downloadBlob, exportAllProjectsArchive } = await import('../domain/archive')
+      const { blob, filename } = await exportAllProjectsArchive()
+      downloadBlob(blob, filename)
+
+      const now = Date.now()
+      for (const project of projects) markBackupDone(project.id, now)
+
+      setNotice(
+        `Скачан архив со всеми проектами: «${filename}». Сохрани его в надёжном месте — из него можно восстановить всю полку.`,
+      )
+    } catch (error) {
+      setArchiveError(
+        error instanceof Error ? error.message : 'Не получилось собрать архив. Попробуй ещё раз.',
+      )
+    } finally {
+      setExporting(false)
     }
   }
 
@@ -118,10 +161,21 @@ export function ShelfScreen() {
         description="Выбери проект, чтобы продолжить. Или начни новый — с вопроса, на который интересно ответить."
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            {projects.length > 0 ? (
+              <button
+                type="button"
+                className={buttonStyles('secondary', 'md')}
+                onClick={handleExportAll}
+                disabled={exporting || importing}
+                title="Скачать один ZIP со всеми проектами"
+              >
+                {exporting ? 'Собираю архив…' : 'Скачать все'}
+              </button>
+            ) : null}
             <label
               className={cn(
                 buttonStyles('secondary', 'md'),
-                importing ? 'pointer-events-none opacity-50' : 'cursor-pointer',
+                importing || exporting ? 'pointer-events-none opacity-50' : 'cursor-pointer',
               )}
             >
               {importing ? 'Импортирую…' : 'Импортировать'}
@@ -129,7 +183,7 @@ export function ShelfScreen() {
                 type="file"
                 accept=".zip,application/zip"
                 className="sr-only"
-                disabled={importing}
+                disabled={importing || exporting}
                 onChange={handleImport}
               />
             </label>
@@ -140,12 +194,21 @@ export function ShelfScreen() {
         }
       />
 
-      {importError ? (
+      {notice ? (
+        <p
+          className="mb-5 rounded-xl border border-forest-100 bg-forest-50 px-4 py-3 text-sm text-forest-700"
+          role="status"
+        >
+          {notice}
+        </p>
+      ) : null}
+
+      {archiveError ? (
         <p
           className="mb-5 rounded-xl border border-clay/30 bg-clay/10 px-4 py-3 text-sm text-clay"
           role="alert"
         >
-          {importError}
+          {archiveError}
         </p>
       ) : null}
 

@@ -262,7 +262,7 @@ export function NewObservationScreen() {
         <h1 className="font-display text-3xl text-ink">
           {editing ? 'Изменить наблюдение' : 'Новое наблюдение'}
         </h1>
-        <p className="mt-1 text-sm text-muted">{project.title}</p>
+        <p className="mt-1 break-words text-sm text-muted">{project.title}</p>
       </div>
 
       <Card className="space-y-4 p-5">

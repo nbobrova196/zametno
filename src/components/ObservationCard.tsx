@@ -62,7 +62,7 @@ export function ObservationCard({
           ) : null}
 
           {observation.note ? (
-            <p className="text-sm leading-relaxed whitespace-pre-line text-ink">{observation.note}</p>
+            <p className="break-words text-sm leading-relaxed whitespace-pre-line text-ink">{observation.note}</p>
           ) : null}
 
           {observation.markIds.length > 0 ? (

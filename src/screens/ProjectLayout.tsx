@@ -56,11 +56,13 @@ export function ProjectLayout() {
         </div>
 
         <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-          <div className="max-w-2xl space-y-1.5">
-            <h1 className="font-display text-3xl leading-tight text-ink xl:text-4xl">{project.title}</h1>
-            {project.subjectName ? <p className="text-sm text-muted">{project.subjectName}</p> : null}
+          <div className="min-w-0 max-w-2xl space-y-1.5">
+            <h1 className="break-words font-display text-3xl leading-tight text-ink xl:text-4xl">{project.title}</h1>
+            {project.subjectName ? (
+              <p className="break-words text-sm text-muted">{project.subjectName}</p>
+            ) : null}
             {project.question ? (
-              <p className="text-base leading-relaxed text-ink/80">{project.question}</p>
+              <p className="break-words text-base leading-relaxed text-ink/80">{project.question}</p>
             ) : null}
           </div>
           <NavLink to={`${base}/add`} className={buttonStyles('primary', 'lg', 'self-start xl:self-auto')}>

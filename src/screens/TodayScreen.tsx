@@ -317,7 +317,7 @@ export function TodayScreen() {
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-3">
                 <Link
                   to={`/p/${project.id}`}
-                  className="font-display text-lg text-ink underline decoration-transparent underline-offset-4 hover:decoration-forest-300"
+                  className="min-w-0 break-words font-display text-lg text-ink underline decoration-transparent underline-offset-4 hover:decoration-forest-300"
                 >
                   {project.title}
                 </Link>
