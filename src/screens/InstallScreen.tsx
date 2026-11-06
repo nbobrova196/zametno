@@ -83,6 +83,19 @@ export function InstallScreen() {
           {APP_NAME} — {APP_TAGLINE}, версия {APP_VERSION}. Приложение работает офлайн, без
           аккаунтов и без отправки данных в интернет.
         </p>
+        <p className="text-sm leading-relaxed text-muted">
+          Автор идеи — Надежда Боброва (tg:{' '}
+          <a
+            href="https://t.me/che_bobriha"
+            className="text-forest-700 underline decoration-forest-200 underline-offset-4"
+          >
+            @che_bobriha
+          </a>
+          ).
+        </p>
+        <p className="text-sm leading-relaxed text-muted">
+          Приложение создано с помощью искусственного интеллекта.
+        </p>
 
         <div className="space-y-2 border-t border-line pt-3">
           <h3 className="text-sm font-medium text-ink">Удалить все данные</h3>
