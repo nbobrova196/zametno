@@ -45,6 +45,7 @@ export function TodayScreen() {
 
   const selectedDate = useMemo(() => parseISO(selectedKey), [selectedKey])
   const isToday = selectedKey === todayKey()
+  const isPast = selectedKey < todayKey()
   const isFuture = selectedKey > todayKey()
 
   const activeProjects = useMemo(
@@ -173,13 +174,21 @@ export function TodayScreen() {
         title={selectedLabel}
         description="Короткий список дел по активным проектам. Отмечай сделанное — история ухода сохранится."
         actions={
-          <Link to="/" className={buttonStyles('secondary', 'md')}>
-            К проектам
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            {!isToday ? (
+              <Button variant="secondary" size="md" onClick={() => setSelectedKey(todayKey())}>
+                Сегодня
+              </Button>
+            ) : null}
+            <Link to="/" className={buttonStyles('secondary', 'md')}>
+              К проектам
+            </Link>
+          </div>
         }
       />
 
       <Card className="mb-5 p-3">
+        <p className="mb-2 px-1 text-xs font-medium text-muted">Эта неделя</p>
         <div className="grid grid-cols-7 gap-1.5">
           {weekDays.map((day) => {
             const key = dayKey(day.getTime())
@@ -288,11 +297,19 @@ export function TodayScreen() {
       ) : groups.length === 0 ? (
         <EmptyState
           emoji={isFuture ? '🗓️' : '🍃'}
-          title={isFuture ? 'На этот день пока пусто' : 'На сегодня задач нет'}
+          title={
+            isFuture
+              ? 'На этот день пока пусто'
+              : isPast
+                ? 'Задач не было'
+                : 'На сегодня задач нет'
+          }
           description={
             isFuture
-              ? 'Можно посмотреть расписание проекта и добавить напоминание.'
-              : 'Это нормально: напоминания помогают, но не заменяют наблюдения. Можно добавить запись в любой момент.'
+              ? 'Можно посмотреть расписание проекта и добавить напоминание на этот день.'
+              : isPast
+                ? 'В этот день напоминаний не было. Выбери другой день недели или вернись к сегодняшнему.'
+                : 'Это нормально: напоминания помогают, но не заменяют наблюдения. Можно добавить запись в любой момент.'
           }
           action={
             <div className="flex flex-wrap justify-center gap-2">
