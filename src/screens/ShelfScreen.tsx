@@ -45,6 +45,18 @@ function ProjectCard({
             style={{ backgroundColor: project.color }}
             aria-hidden="true"
           />
+          {project.status !== 'active' ? (
+            <span
+              className={cn(
+                'absolute bottom-2 left-2 inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium shadow-sm backdrop-blur-sm',
+                project.status === 'paused'
+                  ? 'border-amber-200 bg-amber-100/95 text-amber-600'
+                  : 'border-line bg-surface/95 text-muted',
+              )}
+            >
+              {project.status === 'paused' ? 'На паузе' : 'Завершён'}
+            </span>
+          ) : null}
         </div>
 
         <div className="space-y-2 px-4 py-4">
