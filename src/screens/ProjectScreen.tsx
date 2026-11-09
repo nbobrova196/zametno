@@ -3,7 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { Link, useParams } from 'react-router-dom'
 import { db } from '../db/db'
 import type { Mark, Metric, Observation, Photo, Reminder, ReminderLog } from '../db/types'
-import { listObservations } from '../domain/observations'
+import { groupPhotosByObservation, listObservations } from '../domain/observations'
 import { listReminders } from '../domain/reminderActions'
 import { reminderDone, remindersForDate, todayKey } from '../domain/reminders'
 import { getLastBackupAt, isBackupStale, daysSinceBackup } from '../lib/backup'
@@ -62,12 +62,7 @@ export function ProjectScreen() {
   const start = project.startDate ? new Date(project.startDate).getTime() : project.createdAt
   const days = Math.max(1, daysAgo(start) + 1)
   const todayTasks = remindersForDate(reminders, new Date())
-  const photosByObservation = new Map<string, Photo[]>()
-  for (const photo of photos) {
-    const list = photosByObservation.get(photo.observationId) ?? []
-    list.push(photo)
-    photosByObservation.set(photo.observationId, list)
-  }
+  const photosByObservation = groupPhotosByObservation(photos)
 
   return (
     <div className="space-y-6">

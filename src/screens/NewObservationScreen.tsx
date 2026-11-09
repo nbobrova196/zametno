@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useState, type ChangeEvent } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type DragEvent,
+} from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { db } from '../db/db'
@@ -6,7 +13,7 @@ import type { Mark, Metric, Observation, ObservationKind, Photo } from '../db/ty
 import { listObservations, saveObservation, updateObservation } from '../domain/observations'
 import { completeReminder } from '../domain/reminderActions'
 import { parseMeasurement } from '../domain/measurements'
-import { formatNumber } from '../lib/format'
+import { formatDay, formatNumber, formatTime } from '../lib/format'
 import { getStorageInfo, storageErrorMessage } from '../lib/storage'
 import { useProject } from '../lib/useProject'
 import { PhotoImage } from '../components/PhotoImage'
@@ -17,6 +24,72 @@ const kinds: Array<{ id: ObservationKind; title: string; hint: string }> = [
   { id: 'no_changes', title: 'Изменений нет', hint: 'Смотрел, но всё как прежде' },
   { id: 'skipped', title: 'Не наблюдал', hint: 'Пропуск — это не наблюдение' },
 ]
+
+interface PickedPhoto {
+  id: string
+  file: File
+  url: string
+}
+
+interface ObservationDraft {
+  savedAt: number
+  kind: ObservationKind
+  observedAt: string
+  note: string
+  markIds: string[]
+  values: Record<string, string>
+  important: boolean
+}
+
+const DRAFT_PREFIX = 'zametno:draft:'
+
+function draftKey(projectId: string) {
+  return `${DRAFT_PREFIX}${projectId}`
+}
+
+function readDraft(projectId: string): ObservationDraft | null {
+  try {
+    const raw = window.localStorage.getItem(draftKey(projectId))
+    if (!raw) return null
+    const data = JSON.parse(raw) as Partial<ObservationDraft>
+    if (!data || typeof data !== 'object') return null
+    return {
+      savedAt: typeof data.savedAt === 'number' ? data.savedAt : Date.now(),
+      kind:
+        data.kind === 'no_changes' || data.kind === 'skipped' || data.kind === 'care'
+          ? data.kind
+          : 'observation',
+      observedAt: typeof data.observedAt === 'string' ? data.observedAt : toLocalInput(Date.now()),
+      note: typeof data.note === 'string' ? data.note : '',
+      markIds: Array.isArray(data.markIds) ? data.markIds.filter((id) => typeof id === 'string') : [],
+      values:
+        data.values && typeof data.values === 'object'
+          ? Object.fromEntries(
+              Object.entries(data.values).filter(([, value]) => typeof value === 'string'),
+            )
+          : {},
+      important: Boolean(data.important),
+    }
+  } catch {
+    return null
+  }
+}
+
+function writeDraft(projectId: string, draft: ObservationDraft) {
+  try {
+    window.localStorage.setItem(draftKey(projectId), JSON.stringify(draft))
+  } catch {
+    // Черновик — вспомогательная функция: если localStorage недоступен, просто не сохраняем.
+  }
+}
+
+function clearDraft(projectId: string) {
+  try {
+    window.localStorage.removeItem(draftKey(projectId))
+  } catch {
+    // см. writeDraft
+  }
+}
 
 function toLocalInput(timestamp: number) {
   const date = new Date(timestamp)
@@ -74,18 +147,75 @@ export function NewObservationScreen() {
   const [selectedMarks, setSelectedMarks] = useState<string[]>([])
   const [values, setValues] = useState<Record<string, string>>({})
   const [important, setImportant] = useState(false)
-  const [files, setFiles] = useState<File[]>([])
+  const [picked, setPicked] = useState<PickedPhoto[]>([])
   const [removedPhotoIds, setRemovedPhotoIds] = useState<string[]>([])
-  const [previews, setPreviews] = useState<string[]>([])
+  const [existingOrder, setExistingOrder] = useState<string[] | null>(null)
+  const [dragging, setDragging] = useState(false)
+  const [draftRestoredAt, setDraftRestoredAt] = useState<number | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const pickedUrls = useRef(new Set<string>())
+
+  // Восстанавливаем черновик до того, как эффект сохранения успеет его перезаписать.
+  useEffect(() => {
+    if (editing || !projectId) return
+    const draft = readDraft(projectId)
+    if (!draft) return
+
+    setKind(draft.kind === 'care' ? 'observation' : draft.kind)
+    setObservedAt(draft.observedAt)
+    setNote(draft.note)
+    setSelectedMarks(draft.markIds)
+    setValues(draft.values)
+    setImportant(draft.important)
+    setDraftRestoredAt(draft.savedAt)
+  }, [editing, projectId])
+
+  // Сохраняем черновик с задержкой, чтобы не писать в localStorage на каждую букву.
+  useEffect(() => {
+    if (editing || !projectId) return
+    const timer = window.setTimeout(() => {
+      const hasContent =
+        note.trim().length > 0 ||
+        selectedMarks.length > 0 ||
+        Object.values(values).some((value) => value.trim() !== '') ||
+        important ||
+        kind !== 'observation'
+
+      if (!hasContent) {
+        clearDraft(projectId)
+        return
+      }
+
+      writeDraft(projectId, {
+        savedAt: Date.now(),
+        kind,
+        observedAt,
+        note,
+        markIds: selectedMarks,
+        values,
+        important,
+      })
+    }, 500)
+
+    return () => window.clearTimeout(timer)
+  }, [editing, projectId, kind, observedAt, note, selectedMarks, values, important])
+
+  // Освобождаем blob-адреса выбранных фото, когда они больше не нужны.
+  useEffect(() => {
+    const current = new Set(picked.map((item) => item.url))
+    for (const url of pickedUrls.current) {
+      if (!current.has(url)) URL.revokeObjectURL(url)
+    }
+    pickedUrls.current = current
+  }, [picked])
 
   useEffect(() => {
-    const urls = files.map((file) => URL.createObjectURL(file))
-    setPreviews(urls)
-    return () => urls.forEach((url) => URL.revokeObjectURL(url))
-  }, [files])
+    return () => {
+      for (const url of pickedUrls.current) URL.revokeObjectURL(url)
+    }
+  }, [])
 
   useEffect(() => {
     if (!observationId || !existing || loaded) return
@@ -108,8 +238,23 @@ export function NewObservationScreen() {
     return map
   }, [previousObservation])
 
-  const removed = new Set(removedPhotoIds)
-  const visibleExistingPhotos = existingPhotos.filter((photo) => !removed.has(photo.id))
+  const visibleExistingPhotos = useMemo(() => {
+    const removed = new Set(removedPhotoIds)
+    return existingPhotos
+      .filter((photo) => !removed.has(photo.id))
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.createdAt - b.createdAt)
+  }, [existingPhotos, removedPhotoIds])
+
+  const orderedExistingPhotos = useMemo(() => {
+    const byId = new Map(visibleExistingPhotos.map((photo) => [photo.id, photo]))
+    const natural = visibleExistingPhotos.map((photo) => photo.id)
+    const base = existingOrder ? existingOrder.filter((id) => byId.has(id)) : natural
+    const merged = [...base, ...natural.filter((id) => !base.includes(id))]
+    return merged.flatMap((id) => {
+      const photo = byId.get(id)
+      return photo ? [photo] : []
+    })
+  }, [visibleExistingPhotos, existingOrder])
 
   if (observationId && existing === null) {
     return (
@@ -141,19 +286,71 @@ export function NewObservationScreen() {
   if (!project || !projectId) return null
 
   const isSkipped = kind === 'skipped'
+  const totalPhotos = orderedExistingPhotos.length + picked.length
+
+  function addFiles(list: File[]) {
+    const images = list.filter((file) => file.type.startsWith('image/'))
+    if (images.length === 0) return
+    setPicked((current) => [
+      ...current,
+      ...images.map((file) => ({
+        id: crypto.randomUUID(),
+        file,
+        url: URL.createObjectURL(file),
+      })),
+    ])
+  }
 
   function handleFiles(event: ChangeEvent<HTMLInputElement>) {
-    const selected = Array.from(event.target.files ?? [])
-    if (selected.length > 0) setFiles((current) => [...current, ...selected])
+    addFiles(Array.from(event.target.files ?? []))
     event.target.value = ''
   }
 
-  function removeFile(index: number) {
-    setFiles((current) => current.filter((_, i) => i !== index))
+  function handleDragOver(event: DragEvent<HTMLDivElement>) {
+    if (!Array.from(event.dataTransfer.types).includes('Files')) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+    setDragging(true)
+  }
+
+  function handleDragLeave(event: DragEvent<HTMLDivElement>) {
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return
+    setDragging(false)
+  }
+
+  function handleDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault()
+    setDragging(false)
+    addFiles(Array.from(event.dataTransfer.files))
+  }
+
+  function removePicked(id: string) {
+    setPicked((current) => current.filter((item) => item.id !== id))
   }
 
   function removeExistingPhoto(id: string) {
     setRemovedPhotoIds((current) => [...current, id])
+  }
+
+  function moveExisting(id: string, direction: -1 | 1) {
+    const ids = orderedExistingPhotos.map((photo) => photo.id)
+    const index = ids.indexOf(id)
+    const target = index + direction
+    if (index < 0 || target < 0 || target >= ids.length) return
+    const next = [...ids]
+    ;[next[index], next[target]] = [next[target], next[index]]
+    setExistingOrder(next)
+  }
+
+  function movePicked(id: string, direction: -1 | 1) {
+    setPicked((current) => {
+      const index = current.findIndex((item) => item.id === id)
+      const target = index + direction
+      if (index < 0 || target < 0 || target >= current.length) return current
+      const next = [...current]
+      ;[next[index], next[target]] = [next[target], next[index]]
+      return next
+    })
   }
 
   function toggleMark(markId: string) {
@@ -162,12 +359,24 @@ export function NewObservationScreen() {
     )
   }
 
+  function discardDraft() {
+    if (!projectId) return
+    clearDraft(projectId)
+    setDraftRestoredAt(null)
+    setKind('observation')
+    setObservedAt(toLocalInput(Date.now()))
+    setNote('')
+    setSelectedMarks([])
+    setValues({})
+    setImportant(false)
+  }
+
   async function handleSave() {
     if (!projectId) return
 
     const hasContent =
-      files.length > 0 ||
-      visibleExistingPhotos.length > 0 ||
+      picked.length > 0 ||
+      orderedExistingPhotos.length > 0 ||
       note.trim().length > 0 ||
       selectedMarks.length > 0 ||
       Object.values(values).some((value) => value.trim() !== '')
@@ -181,7 +390,7 @@ export function NewObservationScreen() {
     setError('')
 
     try {
-      const filesToSave = isSkipped ? [] : files
+      const filesToSave = isSkipped ? [] : picked.map((item) => item.file)
 
       if (filesToSave.length > 0) {
         const info = await getStorageInfo()
@@ -206,14 +415,21 @@ export function NewObservationScreen() {
         isImportant: important && !isSkipped,
       }
 
+      const toast = isSkipped
+        ? 'Пропуск отмечен'
+        : editing
+          ? 'Изменения сохранены'
+          : 'Наблюдение сохранено'
+
       if (editing && observationId) {
         await updateObservation({
           id: observationId,
           ...payload,
           files: filesToSave,
           removedPhotoIds,
+          photoOrder: orderedExistingPhotos.map((photo) => photo.id),
         })
-        navigate(`/p/${projectId}/history`, { replace: true })
+        navigate(`/p/${projectId}/history`, { replace: true, state: { toast } })
         return
       }
 
@@ -222,6 +438,8 @@ export function NewObservationScreen() {
         ...payload,
         files: filesToSave,
       })
+
+      clearDraft(projectId)
 
       if (reminderId && reminderDate && !isSkipped) {
         await completeReminder({
@@ -232,7 +450,10 @@ export function NewObservationScreen() {
         })
       }
 
-      navigate(reminderId ? '/today' : `/p/${projectId}/history`, { replace: true })
+      navigate(reminderId ? '/today' : `/p/${projectId}/history`, {
+        replace: true,
+        state: { toast },
+      })
     } catch (saveError) {
       setError(
         storageErrorMessage(
@@ -251,6 +472,9 @@ export function NewObservationScreen() {
       <div className="flex items-center justify-between gap-3">
         <Link
           to={editing ? `/p/${projectId}/history` : `/p/${projectId}`}
+          onClick={() => {
+            if (!editing) clearDraft(projectId)
+          }}
           className="text-sm font-medium text-forest-700 underline decoration-forest-200 underline-offset-4"
         >
           ← {editing ? 'К истории' : 'К проекту'}
@@ -264,6 +488,18 @@ export function NewObservationScreen() {
         </h1>
         <p className="mt-1 break-words text-sm text-muted">{project.title}</p>
       </div>
+
+      {draftRestoredAt ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-forest-100 bg-forest-50 px-4 py-3">
+          <p className="text-sm leading-relaxed text-forest-700">
+            Черновик от {formatDay(draftRestoredAt)}, {formatTime(draftRestoredAt)}. Текст,
+            отметки и измерения восстановлены — фото нужно выбрать заново.
+          </p>
+          <Button variant="secondary" size="sm" onClick={discardDraft}>
+            Очистить
+          </Button>
+        </div>
+      ) : null}
 
       <Card className="space-y-4 p-5">
         <div className="grid gap-3 sm:grid-cols-3">
@@ -328,61 +564,137 @@ export function NewObservationScreen() {
               <span className="text-xs text-muted">Можно несколько · сжимаются автоматически</span>
             </div>
 
-            {visibleExistingPhotos.length > 0 || previews.length > 0 ? (
+            {totalPhotos > 0 ? (
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                {visibleExistingPhotos.map((photo, index) => (
-                  <div key={photo.id} className="group relative overflow-hidden rounded-xl">
-                    <PhotoImage
-                      photo={photo}
-                      className="aspect-[4/3] w-full object-cover"
-                      alt={`Фото из записи ${index + 1}`}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeExistingPhoto(photo.id)}
-                      className="absolute top-1.5 right-1.5 inline-flex min-h-11 items-center rounded-full bg-ink/70 px-3 py-2 text-xs text-white backdrop-blur hover:bg-ink"
-                      aria-label={`Убрать фото ${index + 1} из записи`}
-                    >
-                      Убрать
-                    </button>
+                {orderedExistingPhotos.map((photo, index) => (
+                  <div
+                    key={photo.id}
+                    className="overflow-hidden rounded-xl border border-line bg-surface"
+                  >
+                    <div className="relative">
+                      <PhotoImage
+                        photo={photo}
+                        className="aspect-[4/3] w-full object-cover"
+                        alt={`Фото из записи ${index + 1}`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeExistingPhoto(photo.id)}
+                        className="absolute top-1.5 right-1.5 inline-flex min-h-11 items-center rounded-full bg-ink/70 px-3 py-2 text-xs text-white backdrop-blur hover:bg-ink"
+                        aria-label={`Убрать фото ${index + 1} из записи`}
+                      >
+                        Убрать
+                      </button>
+                    </div>
+                    {totalPhotos > 1 ? (
+                      <div className="flex items-center justify-between px-1">
+                        <button
+                          type="button"
+                          onClick={() => moveExisting(photo.id, -1)}
+                          disabled={index === 0}
+                          aria-label={`Переместить фото ${index + 1} влево`}
+                          className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-muted transition-colors hover:bg-paper hover:text-ink disabled:opacity-30"
+                        >
+                          ←
+                        </button>
+                        <span className="text-xs text-muted" aria-hidden="true">
+                          {index + 1}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => moveExisting(photo.id, 1)}
+                          disabled={index === orderedExistingPhotos.length - 1}
+                          aria-label={`Переместить фото ${index + 1} вправо`}
+                          className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-muted transition-colors hover:bg-paper hover:text-ink disabled:opacity-30"
+                        >
+                          →
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 ))}
-                {previews.map((url, index) => (
-                  <div key={url} className="group relative overflow-hidden rounded-xl">
-                    <img
-                      src={url}
-                      alt={`Выбранное фото ${index + 1}`}
-                      className="aspect-[4/3] w-full object-cover"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeFile(index)}
-                      className="absolute top-1.5 right-1.5 inline-flex min-h-11 items-center rounded-full bg-ink/70 px-3 py-2 text-xs text-white backdrop-blur hover:bg-ink"
-                      aria-label={`Убрать фото ${index + 1}`}
-                    >
-                      Убрать
-                    </button>
+                {picked.map((item, index) => (
+                  <div
+                    key={item.id}
+                    className="overflow-hidden rounded-xl border border-line bg-surface"
+                  >
+                    <div className="relative">
+                      <img
+                        src={item.url}
+                        alt={`Выбранное фото ${orderedExistingPhotos.length + index + 1}`}
+                        className="aspect-[4/3] w-full object-cover"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removePicked(item.id)}
+                        className="absolute top-1.5 right-1.5 inline-flex min-h-11 items-center rounded-full bg-ink/70 px-3 py-2 text-xs text-white backdrop-blur hover:bg-ink"
+                        aria-label={`Убрать фото ${orderedExistingPhotos.length + index + 1}`}
+                      >
+                        Убрать
+                      </button>
+                    </div>
+                    {totalPhotos > 1 ? (
+                      <div className="flex items-center justify-between px-1">
+                        <button
+                          type="button"
+                          onClick={() => movePicked(item.id, -1)}
+                          disabled={index === 0}
+                          aria-label={`Переместить фото ${orderedExistingPhotos.length + index + 1} влево`}
+                          className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-muted transition-colors hover:bg-paper hover:text-ink disabled:opacity-30"
+                        >
+                          ←
+                        </button>
+                        <span className="text-xs text-muted" aria-hidden="true">
+                          {orderedExistingPhotos.length + index + 1}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => movePicked(item.id, 1)}
+                          disabled={index === picked.length - 1}
+                          aria-label={`Переместить фото ${orderedExistingPhotos.length + index + 1} вправо`}
+                          className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-muted transition-colors hover:bg-paper hover:text-ink disabled:opacity-30"
+                        >
+                          →
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 ))}
               </div>
             ) : null}
 
-            <label
-              htmlFor="photoInput"
-              className="flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-forest-200 bg-forest-50/40 px-4 py-8 text-center transition-colors hover:border-forest-300 hover:bg-forest-50"
+            <div
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
             >
-              <span className="text-2xl" aria-hidden="true">📷</span>
-              <span className="text-sm font-medium text-forest-700">Добавить фото</span>
-              <span className="text-xs text-muted">Из галереи или камеры — сожмём автоматически</span>
-            </label>
-            <input
-              id="photoInput"
-              type="file"
-              accept="image/*"
-              multiple
-              onChange={handleFiles}
-              className="sr-only"
-            />
+              <label
+                htmlFor="photoInput"
+                className={cn(
+                  'flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border border-dashed px-4 py-8 text-center transition-colors',
+                  dragging
+                    ? 'border-forest-500 bg-forest-50'
+                    : 'border-forest-200 bg-forest-50/40 hover:border-forest-300 hover:bg-forest-50',
+                )}
+              >
+                <span className="text-2xl" aria-hidden="true">📷</span>
+                <span className="text-sm font-medium text-forest-700">
+                  {dragging ? 'Отпусти фото' : 'Добавить фото'}
+                </span>
+                <span className="text-xs text-muted">
+                  Нажми, чтобы выбрать из галереи или камеры. На компьютере можно перетащить файлы
+                  сюда.
+                </span>
+              </label>
+              <input
+                id="photoInput"
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={handleFiles}
+                className="sr-only"
+              />
+            </div>
           </Card>
 
           <Card className="space-y-4 p-5">
@@ -498,6 +810,9 @@ export function NewObservationScreen() {
         </Button>
         <Link
           to={editing ? `/p/${projectId}/history` : `/p/${projectId}`}
+          onClick={() => {
+            if (!editing) clearDraft(projectId)
+          }}
           className="text-sm font-medium text-forest-700 underline decoration-forest-200 underline-offset-4"
         >
           Отменить

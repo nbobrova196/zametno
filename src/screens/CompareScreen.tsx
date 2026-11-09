@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { useState } from 'react'
 import { db } from '../db/db'
 import type { Observation, Photo } from '../db/types'
+import { groupPhotosByObservation } from '../domain/observations'
 import { formatFull } from '../lib/format'
 import { PhotoImage } from '../components/PhotoImage'
 import { EmptyState, buttonStyles, Card } from '../components/ui'
@@ -37,12 +38,7 @@ export function CompareScreen() {
   const observationsById = new Map<string, Observation>(
     observations.map((observation) => [observation.id, observation]),
   )
-  const photosByObservation = new Map<string, Photo[]>()
-  for (const photo of photos) {
-    const list = photosByObservation.get(photo.observationId) ?? []
-    list.push(photo)
-    photosByObservation.set(photo.observationId, list)
-  }
+  const photosByObservation = groupPhotosByObservation(photos)
 
   // Сравниваем разные наблюдения, а не два кадра одной записи.
   const observationItems: Item[] = observations

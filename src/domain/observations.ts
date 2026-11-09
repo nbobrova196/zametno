@@ -1,5 +1,5 @@
 import { db } from '../db/db'
-import type { Measurement, Observation, ObservationKind } from '../db/types'
+import type { Measurement, Observation, ObservationKind, Photo } from '../db/types'
 import { compressPhoto } from '../lib/photos'
 
 export interface SaveObservationInput {
@@ -23,6 +23,8 @@ export interface UpdateObservationInput {
   isImportant: boolean
   files: File[]
   removedPhotoIds: string[]
+  /** Существующие фото в нужном порядке. Новые файлы добавляются после них. */
+  photoOrder?: string[]
 }
 
 function observationFields(input: {
@@ -105,9 +107,18 @@ export async function updateObservation(input: UpdateObservationInput) {
       await db.photos.bulkDelete(input.removedPhotoIds)
     }
 
-    if (compressed.length > 0) {
+    let nextOrder = 0
+    if (input.photoOrder && input.photoOrder.length > 0) {
+      await Promise.all(
+        input.photoOrder.map((photoId, index) => db.photos.update(photoId, { order: index })),
+      )
+      nextOrder = input.photoOrder.length
+    } else {
       const current = await db.photos.where('observationId').equals(input.id).toArray()
-      const maxOrder = current.reduce((max, photo) => Math.max(max, photo.order ?? 0), -1)
+      nextOrder = current.reduce((max, photo) => Math.max(max, photo.order ?? 0), -1) + 1
+    }
+
+    if (compressed.length > 0) {
       const newPhotos = compressed.map((photo, index) => ({
         id: crypto.randomUUID(),
         projectId: existing.projectId,
@@ -116,7 +127,7 @@ export async function updateObservation(input: UpdateObservationInput) {
         thumb: photo.thumb,
         width: photo.width,
         height: photo.height,
-        order: maxOrder + 1 + index,
+        order: nextOrder + index,
         createdAt: now,
       }))
       await db.photos.bulkAdd(newPhotos)
@@ -143,6 +154,20 @@ export async function listObservations(projectId: string) {
 export async function listPhotos(projectId: string) {
   const photos = await db.photos.where('projectId').equals(projectId).toArray()
   return photos.sort((a, b) => a.createdAt - b.createdAt || (a.order ?? 0) - (b.order ?? 0))
+}
+
+/** Фото по записям, в порядке, который задал ребёнок. */
+export function groupPhotosByObservation(photos: Photo[]) {
+  const map = new Map<string, Photo[]>()
+  for (const photo of photos) {
+    const list = map.get(photo.observationId) ?? []
+    list.push(photo)
+    map.set(photo.observationId, list)
+  }
+  for (const list of map.values()) {
+    list.sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.createdAt - b.createdAt)
+  }
+  return map
 }
 
 export async function deleteObservation(observationId: string) {

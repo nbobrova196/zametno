@@ -3,7 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { Link, useParams } from 'react-router-dom'
 import { db } from '../db/db'
 import type { Mark, Metric, Observation, Photo } from '../db/types'
-import { listObservations } from '../domain/observations'
+import { groupPhotosByObservation, listObservations } from '../domain/observations'
 import { dayKey, dayLabel } from '../lib/format'
 import { ObservationCard } from '../components/ObservationCard'
 import { ObservationActions } from '../components/ObservationActions'
@@ -38,12 +38,7 @@ export function HistoryScreen() {
 
   const visible = importantOnly ? observations.filter((item) => item.isImportant) : observations
 
-  const photosByObservation = new Map<string, Photo[]>()
-  for (const photo of photos) {
-    const list = photosByObservation.get(photo.observationId) ?? []
-    list.push(photo)
-    photosByObservation.set(photo.observationId, list)
-  }
+  const photosByObservation = groupPhotosByObservation(photos)
 
   const groups: Array<{ key: string; label: string; timestamp: number; items: typeof visible }> = []
   for (const observation of visible) {

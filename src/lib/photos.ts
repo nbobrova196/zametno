@@ -60,7 +60,7 @@ function drawToBlob(
   })
 }
 
-export async function compressPhoto(file: File): Promise<CompressedPhoto> {
+async function compressPhotoOnMainThread(file: File): Promise<CompressedPhoto> {
   const source = await loadBitmap(file)
   const full = fit(source.width, source.height, MAX_SIDE)
   const small = fit(source.width, source.height, THUMB_SIDE)
@@ -71,6 +71,101 @@ export async function compressPhoto(file: File): Promise<CompressedPhoto> {
     return { blob, thumb, width: full.width, height: full.height }
   } finally {
     if ('close' in source) source.close()
+  }
+}
+
+interface WorkerResponse {
+  id: number
+  ok: boolean
+  blob?: Blob
+  thumb?: Blob
+  width?: number
+  height?: number
+}
+
+interface PendingRequest {
+  resolve: (photo: CompressedPhoto) => void
+  reject: (error: Error) => void
+  timer: number
+}
+
+let worker: Worker | null = null
+let workerUnavailable = false
+let nextRequestId = 1
+const pending = new Map<number, PendingRequest>()
+
+function failPending(error: Error) {
+  for (const request of pending.values()) {
+    window.clearTimeout(request.timer)
+    request.reject(error)
+  }
+  pending.clear()
+}
+
+function getWorker(): Worker | null {
+  if (workerUnavailable) return null
+  if (worker) return worker
+  if (typeof Worker === 'undefined' || typeof OffscreenCanvas === 'undefined') {
+    workerUnavailable = true
+    return null
+  }
+
+  try {
+    const instance = new Worker(new URL('./photoWorker.ts', import.meta.url), { type: 'module' })
+    instance.onmessage = (event: MessageEvent<WorkerResponse>) => {
+      const data = event.data
+      const request = pending.get(data.id)
+      if (!request) return
+      pending.delete(data.id)
+      window.clearTimeout(request.timer)
+
+      if (data.ok && data.blob && data.thumb && data.width && data.height) {
+        request.resolve({
+          blob: data.blob,
+          thumb: data.thumb,
+          width: data.width,
+          height: data.height,
+        })
+      } else {
+        request.reject(new Error('Не удалось обработать фотографию'))
+      }
+    }
+    instance.onerror = () => {
+      workerUnavailable = true
+      instance.terminate()
+      worker = null
+      failPending(new Error('Сжатие фотографий недоступно'))
+    }
+    worker = instance
+    return instance
+  } catch {
+    workerUnavailable = true
+    return null
+  }
+}
+
+function compressInWorker(file: File): Promise<CompressedPhoto> {
+  const instance = getWorker()
+  if (!instance) return Promise.reject(new Error('Сжатие в фоне недоступно'))
+
+  const id = nextRequestId++
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      pending.delete(id)
+      reject(new Error('Сжатие фотографии заняло слишком много времени'))
+    }, 20_000)
+
+    pending.set(id, { resolve, reject, timer })
+    instance.postMessage({ id, file })
+  })
+}
+
+/** Сжимает фото в Web Worker, а если он недоступен — на основном потоке. */
+export async function compressPhoto(file: File): Promise<CompressedPhoto> {
+  try {
+    return await compressInWorker(file)
+  } catch {
+    return compressPhotoOnMainThread(file)
   }
 }
 

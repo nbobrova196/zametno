@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { db } from '../db/db'
 import type { Observation, Photo, Project } from '../db/types'
-import { deleteObservation, saveObservation, updateObservation } from './observations'
+import { deleteObservation, groupPhotosByObservation, saveObservation, updateObservation } from './observations'
 
 const project: Project = {
   id: 'p1',
@@ -178,5 +178,51 @@ describe('наблюдения', () => {
     expect(await db.photos.get('a')).toBeUndefined()
     expect(await db.photos.get('b')).toBeDefined()
     expect((await db.projects.get(project.id))?.coverPhotoId).toBe('b')
+  })
+
+  it('меняет порядок фото по photoOrder', async () => {
+    const id = await saveObservation({
+      projectId: project.id,
+      kind: 'observation',
+      observedAt: 100,
+      note: '',
+      markIds: [],
+      measurements: [],
+      isImportant: false,
+      files: [],
+    })
+    await db.photos.bulkAdd([photo('first', id, 10), photo('second', id, 11), photo('third', id, 12)])
+
+    await updateObservation({
+      id,
+      kind: 'observation',
+      observedAt: 100,
+      note: '',
+      markIds: [],
+      measurements: [],
+      isImportant: false,
+      files: [],
+      removedPhotoIds: [],
+      photoOrder: ['third', 'first', 'second'],
+    })
+
+    expect((await db.photos.get('third'))?.order).toBe(0)
+    expect((await db.photos.get('first'))?.order).toBe(1)
+    expect((await db.photos.get('second'))?.order).toBe(2)
+
+    const grouped = groupPhotosByObservation(await db.photos.where('projectId').equals(project.id).toArray())
+    expect(grouped.get(id)?.map((item) => item.id)).toEqual(['third', 'first', 'second'])
+  })
+
+  it('сортирует фото в группе по порядку, а не по id', async () => {
+    const grouped = groupPhotosByObservation([
+      { ...photo('b', 'o1', 10), order: 1 },
+      { ...photo('a', 'o1', 10), order: 0 },
+      { ...photo('d', 'o2', 10), order: 1 },
+      { ...photo('c', 'o2', 10), order: 0 },
+    ])
+
+    expect(grouped.get('o1')?.map((item) => item.id)).toEqual(['a', 'b'])
+    expect(grouped.get('o2')?.map((item) => item.id)).toEqual(['c', 'd'])
   })
 })

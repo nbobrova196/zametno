@@ -1,5 +1,5 @@
-import { NavLink } from 'react-router-dom'
-import type { ReactNode } from 'react'
+import { NavLink, useLocation, useNavigate } from 'react-router-dom'
+import { useEffect, useState, type ReactNode } from 'react'
 import { APP_NAME, APP_TAGLINE } from '../app/config'
 import { LogoMark } from './Logo'
 import { cn } from './ui'
@@ -28,9 +28,45 @@ const items = [
   { to: '/install', label: 'На устройство', end: false },
 ]
 
+function Toast() {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const message = (location.state as { toast?: string } | null)?.toast
+  const [shown, setShown] = useState(false)
+
+  useEffect(() => {
+    if (!message) return
+    setShown(true)
+    const hide = window.setTimeout(() => setShown(false), 2600)
+    const clear = window.setTimeout(() => {
+      navigate(`${location.pathname}${location.search}`, { replace: true, state: null })
+    }, 3200)
+    return () => {
+      window.clearTimeout(hide)
+      window.clearTimeout(clear)
+    }
+  }, [message, location.pathname, location.search, navigate])
+
+  if (!message) return null
+
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className={cn(
+        'pointer-events-none fixed inset-x-4 bottom-5 z-50 mx-auto flex max-w-sm items-center justify-center rounded-full bg-ink px-5 py-3 text-center text-sm text-white shadow-lg transition-all duration-300',
+        shown ? 'translate-y-0 opacity-100' : 'translate-y-2 opacity-0',
+      )}
+    >
+      {message}
+    </div>
+  )
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-dvh bg-paper text-ink">
+      <Toast />
       <div className="mx-auto flex min-h-dvh w-full max-w-[1440px]">
         <aside className="sticky top-0 hidden h-dvh w-[240px] shrink-0 flex-col border-r border-line px-5 py-7 lg:flex">
           <NavLink to="/" className="rounded-xl focus-visible:outline-none">
