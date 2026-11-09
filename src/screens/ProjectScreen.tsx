@@ -1,20 +1,28 @@
 import { useEffect, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { db } from '../db/db'
 import type { Mark, Metric, Observation, Photo, Reminder, ReminderLog } from '../db/types'
 import { groupPhotosByObservation, listObservations } from '../domain/observations'
+import { updateProject } from '../domain/projects'
 import { listReminders } from '../domain/reminderActions'
 import { reminderDone, remindersForDate, todayKey } from '../domain/reminders'
 import { getLastBackupAt, isBackupStale, daysSinceBackup } from '../lib/backup'
 import { importantEventsWord, daysAgo, daysWord, observationsWord } from '../lib/format'
+import {
+  daysWithoutEntries,
+  getPauseSnoozeUntil,
+  shouldSuggestPause,
+  snoozePauseSuggestion,
+} from '../lib/pauseSuggestion'
 import { useProject } from '../lib/useProject'
 import { ObservationCard } from '../components/ObservationCard'
 import { ObservationActions } from '../components/ObservationActions'
-import { Badge, EmptyState, buttonStyles, Card, Stat } from '../components/ui'
+import { Badge, Button, EmptyState, buttonStyles, Card, Stat } from '../components/ui'
 
 export function ProjectScreen() {
   const { projectId } = useParams()
+  const navigate = useNavigate()
   const project = useProject(projectId)
 
   const observations = useLiveQuery(
@@ -49,6 +57,7 @@ export function ProjectScreen() {
   )
 
   const [lastBackupAt, setLastBackupAt] = useState<number | null>(null)
+  const [pauseSnoozedFor, setPauseSnoozedFor] = useState<string | null>(null)
   useEffect(() => {
     if (projectId) setLastBackupAt(getLastBackupAt(projectId))
   }, [projectId])
@@ -56,6 +65,23 @@ export function ProjectScreen() {
   if (!project || !projectId) return null
 
   const backupStale = observations.length > 0 && isBackupStale(lastBackupAt)
+
+  const suggestPause =
+    pauseSnoozedFor !== projectId &&
+    shouldSuggestPause(project, observations, getPauseSnoozeUntil(projectId))
+  const daysWithout = daysWithoutEntries(project, observations)
+
+  async function handlePauseProject() {
+    if (!projectId) return
+    await updateProject(projectId, { status: 'paused' })
+    navigate(`/p/${projectId}`, { replace: true, state: { toast: 'Проект на паузе' } })
+  }
+
+  function handleKeepGoing() {
+    if (!projectId) return
+    snoozePauseSuggestion(projectId)
+    setPauseSnoozedFor(projectId)
+  }
 
   const counted = observations.filter((observation) => observation.kind !== 'skipped')
   const important = observations.filter((observation) => observation.isImportant)
@@ -73,7 +99,7 @@ export function ProjectScreen() {
       </div>
 
       {backupStale ? (
-        <Card className="border-amber-200 bg-amber-100/50 p-4">
+        <Card className="!border-amber-200 !bg-amber-100/50 p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
               <h2 className="font-display text-lg text-ink">Пора сохранить копию</h2>
@@ -125,6 +151,31 @@ export function ProjectScreen() {
               )
             })}
           </ul>
+        </Card>
+      ) : null}
+
+      {suggestPause ? (
+        <Card className="!border-amber-200 !bg-amber-100/50 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="font-display text-lg text-ink">Давно не было записей</h2>
+              <p className="mt-0.5 text-sm leading-relaxed text-muted">
+                {observations.length > 0
+                  ? `Последняя запись — ${daysWithout} ${daysWord(daysWithout)} назад. `
+                  : `Проект создан ${daysWithout} ${daysWord(daysWithout)} назад, записей пока нет. `}
+                Если сейчас перерыв, поставь проект на паузу: напоминания не будут появляться на
+                экране «Сегодня», а история и фото останутся на месте.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" onClick={() => void handlePauseProject()}>
+                Поставить на паузу
+              </Button>
+              <Button variant="secondary" size="sm" onClick={handleKeepGoing}>
+                Продолжаю
+              </Button>
+            </div>
+          </div>
         </Card>
       ) : null}
 

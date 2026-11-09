@@ -1,13 +1,20 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { useState, type ChangeEvent } from 'react'
+import { useMemo, useState, type ChangeEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { db } from '../db/db'
 import type { Photo, Project } from '../db/types'
+import { updateProject } from '../domain/projects'
 import { getTemplate } from '../domain/templates'
 import { daysAgo, daysWord, observationsWord } from '../lib/format'
 import { markBackupDone } from '../lib/backup'
+import {
+  daysWithoutEntries,
+  getPauseSnoozeUntil,
+  shouldSuggestPause,
+  snoozePauseSuggestion,
+} from '../lib/pauseSuggestion'
 import { PhotoImage } from '../components/PhotoImage'
-import { Badge, buttonStyles, Card, EmptyState, PageHeader, cn } from '../components/ui'
+import { Badge, Button, buttonStyles, Card, EmptyState, PageHeader, cn } from '../components/ui'
 
 function ProjectCard({
   project,
@@ -101,6 +108,30 @@ export function ShelfScreen() {
   const [exporting, setExporting] = useState(false)
   const [archiveError, setArchiveError] = useState('')
   const [notice, setNotice] = useState('')
+  const [pauseTick, setPauseTick] = useState(0)
+
+  const pauseCandidate = useMemo(() => {
+    const now = Date.now()
+    let best: { project: Project; days: number } | null = null
+    for (const project of projects) {
+      if (project.status !== 'active') continue
+      const own = observations.filter((observation) => observation.projectId === project.id)
+      if (!shouldSuggestPause(project, own, getPauseSnoozeUntil(project.id, now), now)) continue
+      const days = daysWithoutEntries(project, own, now)
+      if (!best || days > best.days) best = { project, days }
+    }
+    return best
+  }, [projects, observations, pauseTick])
+
+  async function handlePauseProject(project: Project) {
+    await updateProject(project.id, { status: 'paused' })
+    setNotice(`Проект «${project.title}» на паузе. Вернуть в работу можно в настройках проекта.`)
+  }
+
+  function handleSnoozePause(projectId: string) {
+    snoozePauseSuggestion(projectId)
+    setPauseTick((tick) => tick + 1)
+  }
 
   async function handleImport(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
@@ -222,6 +253,33 @@ export function ShelfScreen() {
         >
           {archiveError}
         </p>
+      ) : null}
+
+      {pauseCandidate ? (
+        <Card className="mb-5 !border-amber-200 !bg-amber-100/50 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="font-display text-lg text-ink">Проект давно ждёт записи</h2>
+              <p className="mt-0.5 text-sm leading-relaxed text-muted">
+                «{pauseCandidate.project.title}» — без записей {pauseCandidate.days}{' '}
+                {daysWord(pauseCandidate.days)}. Если это перерыв, можно поставить проект на
+                паузу: напоминания по нему не будут появляться на экране «Сегодня».
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" onClick={() => void handlePauseProject(pauseCandidate.project)}>
+                Поставить на паузу
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => handleSnoozePause(pauseCandidate.project.id)}
+              >
+                Продолжаю
+              </Button>
+            </div>
+          </div>
+        </Card>
       ) : null}
 
       {projects.length === 0 ? (
