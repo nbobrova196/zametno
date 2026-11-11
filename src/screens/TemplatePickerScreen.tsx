@@ -9,7 +9,7 @@ export function TemplatePickerScreen() {
       <PageHeader
         eyebrow="Шаг 1 из 2"
         title="С чего начнём?"
-        description="Выбери готовую тему или свою. Поля и подсказки потом можно будет изменить."
+        description="Выбери готовую тему — животное, растение, погода, физика или химия — либо свою. Поля и подсказки потом можно будет изменить."
       />
 
       <div className="grid gap-4 sm:grid-cols-2">
@@ -24,11 +24,14 @@ export function TemplatePickerScreen() {
                 <span className="text-4xl" aria-hidden="true">
                   {template.emoji}
                 </span>
-                <Badge tone="neutral">
-                  {template.metrics.length > 0
-                    ? `${template.metrics.length} ${metricsWord(template.metrics.length)}`
-                    : 'без измерений'}
-                </Badge>
+                <div className="flex flex-wrap items-start justify-end gap-1.5">
+                  {template.hasFormulas ? <Badge tone="green">с формулами</Badge> : null}
+                  <Badge tone="neutral">
+                    {template.metrics.length > 0
+                      ? `${template.metrics.length} ${metricsWord(template.metrics.length)}`
+                      : 'без измерений'}
+                  </Badge>
+                </div>
               </div>
 
               <div className="space-y-1">
@@ -46,7 +49,8 @@ export function TemplatePickerScreen() {
       </div>
 
       <p className="mt-6 text-sm leading-relaxed text-muted">
-        Не знаешь, что выбрать? Начни с «Своей темы»: название и вопрос можно придумать по ходу.
+        В темах «Физика» и «Химия» в заметку можно вставить формулу — кнопка «Вставить формулу». Не
+        знаешь, что выбрать? Начни со «Своей темы»: название и вопрос можно придумать по ходу.
       </p>
     </div>
   )

@@ -1,4 +1,4 @@
-export type TemplateId = 'animal' | 'plant' | 'weather' | 'custom'
+export type TemplateId = 'animal' | 'plant' | 'weather' | 'physics' | 'chemistry' | 'custom'
 export type ProjectMode = 'quick' | 'research'
 export type ProjectStatus = 'active' | 'paused' | 'completed'
 export type ObservationKind = 'observation' | 'no_changes' | 'skipped' | 'care'

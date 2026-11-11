@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { createProject } from '../domain/projects'
-import { getTemplate } from '../domain/templates'
+import { getTemplate, type Template } from '../domain/templates'
 import type { ProjectMode } from '../db/types'
 import { Button, Card, Field, Input, PageHeader, Textarea, cn } from '../components/ui'
 
@@ -22,6 +22,27 @@ function today() {
   const now = new Date()
   const offset = now.getTimezoneOffset()
   return new Date(now.getTime() - offset * 60_000).toISOString().slice(0, 10)
+}
+
+function TemplateHints({ template }: { template: Template }) {
+  return (
+    <Card className="space-y-3 p-5">
+      <p className="text-xs font-semibold tracking-wide text-forest-600 uppercase">Подсказки темы</p>
+      <p className="font-display text-xl text-ink">{template.title}</p>
+      <ul className="space-y-2 text-sm leading-relaxed text-muted">
+        {template.hints.map((hint) => (
+          <li key={hint} className="flex gap-2">
+            <span className="text-forest-500">•</span>
+            <span>{hint}</span>
+          </li>
+        ))}
+      </ul>
+      <div className="rounded-xl bg-paper px-3.5 py-3">
+        <p className="text-xs text-muted">Что будем отмечать</p>
+        <p className="mt-1 text-sm text-ink">{template.marks.slice(0, 4).join(' · ')}</p>
+      </div>
+    </Card>
+  )
 }
 
 export function CreateProjectScreen() {
@@ -96,7 +117,11 @@ export function CreateProjectScreen() {
             <Field
               label="Название проекта"
               htmlFor="title"
-              hint="Например: «Две недели с Тортиллой» или «Фасоль на подоконнике»."
+              hint={
+                template.titleExample
+                  ? `Например: «${template.titleExample}».`
+                  : 'Например: «Две недели с Тортиллой» или «Фасоль на подоконнике».'
+              }
             >
               <Input
                 id="title"
@@ -111,7 +136,11 @@ export function CreateProjectScreen() {
             <Field
               label="Объект наблюдения"
               htmlFor="subject"
-              hint="Можно не указывать точно: «двор», «балкон», «черепаха Тортилла»."
+              hint={
+                template.subjectExample
+                  ? `Например: ${template.subjectExample}.`
+                  : 'Можно не указывать точно: «двор», «балкон», «черепаха Тортилла».'
+              }
             >
               <Input
                 id="subject"
@@ -207,27 +236,16 @@ export function CreateProjectScreen() {
               Выбрать другую тему
             </Link>
           </div>
+
+          <div className="lg:hidden">
+            <TemplateHints template={template} />
+          </div>
         </div>
 
         <aside className="hidden lg:block">
-          <Card className="sticky top-10 space-y-3 p-5">
-            <p className="text-xs font-semibold tracking-wide text-forest-600 uppercase">Подсказки темы</p>
-            <p className="font-display text-xl text-ink">{template.title}</p>
-            <ul className="space-y-2 text-sm leading-relaxed text-muted">
-              {template.hints.map((hint) => (
-                <li key={hint} className="flex gap-2">
-                  <span className="text-forest-500">•</span>
-                  <span>{hint}</span>
-                </li>
-              ))}
-            </ul>
-            <div className="rounded-xl bg-paper px-3.5 py-3">
-              <p className="text-xs text-muted">Что будем отмечать</p>
-              <p className="mt-1 text-sm text-ink">
-                {template.marks.slice(0, 4).join(' · ')}
-              </p>
-            </div>
-          </Card>
+          <div className="sticky top-10">
+            <TemplateHints template={template} />
+          </div>
         </aside>
       </form>
     </div>
