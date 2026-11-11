@@ -13,9 +13,11 @@ import type { Mark, Metric, Observation, ObservationKind, Photo } from '../db/ty
 import { listObservations, saveObservation, updateObservation } from '../domain/observations'
 import { completeReminder } from '../domain/reminderActions'
 import { parseMeasurement } from '../domain/measurements'
+import { formulaToText, type Formula } from '../domain/formulas'
 import { formatDay, formatNumber, formatTime } from '../lib/format'
 import { getStorageInfo, storageErrorMessage } from '../lib/storage'
 import { useProject } from '../lib/useProject'
+import { FormulaPicker } from '../components/FormulaPicker'
 import { PhotoImage } from '../components/PhotoImage'
 import { Button, Card, Field, Input, Textarea, cn } from '../components/ui'
 
@@ -151,6 +153,7 @@ export function NewObservationScreen() {
   const [removedPhotoIds, setRemovedPhotoIds] = useState<string[]>([])
   const [existingOrder, setExistingOrder] = useState<string[] | null>(null)
   const [dragging, setDragging] = useState(false)
+  const [formulaOpen, setFormulaOpen] = useState(false)
   const [draftRestoredAt, setDraftRestoredAt] = useState<number | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -326,6 +329,26 @@ export function NewObservationScreen() {
 
   function removePicked(id: string) {
     setPicked((current) => current.filter((item) => item.id !== id))
+  }
+
+  function insertFormula(formula: Formula) {
+    const text = formulaToText(formula)
+    const field = document.getElementById('note') as HTMLTextAreaElement | null
+    const start = field?.selectionStart ?? note.length
+    const end = field?.selectionEnd ?? note.length
+    const before = note.slice(0, start)
+    const after = note.slice(end)
+    const prefix = before.length > 0 && !before.endsWith('\n') ? '\n\n' : ''
+    const suffix = after.length > 0 && !after.startsWith('\n') ? '\n\n' : ''
+    const next = `${before}${prefix}${text}${suffix}${after}`
+
+    setNote(next)
+    window.requestAnimationFrame(() => {
+      if (!field) return
+      field.focus()
+      const position = (before + prefix + text).length
+      field.setSelectionRange(position, position)
+    })
   }
 
   function removeExistingPhoto(id: string) {
@@ -707,6 +730,27 @@ export function NewObservationScreen() {
                 placeholder="Например: сегодня лист развернулся почти полностью"
               />
             </Field>
+
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setFormulaOpen((open) => !open)}
+                  aria-expanded={formulaOpen}
+                  aria-controls="formula-picker"
+                >
+                  {formulaOpen ? 'Скрыть формулы' : 'Вставить формулу'}
+                </Button>
+                <span className="text-xs text-muted">Физика и химия · 5–6 класс</span>
+              </div>
+              {formulaOpen ? (
+                <div id="formula-picker">
+                  <FormulaPicker onInsert={insertFormula} />
+                </div>
+              ) : null}
+            </div>
 
             {marks.length > 0 ? (
               <div className="space-y-2">
