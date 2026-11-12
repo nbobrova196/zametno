@@ -29,6 +29,14 @@ describe('темы проектов', () => {
     expect(chemistry?.metrics.length).toBeGreaterThan(0)
   })
 
+  it('есть тема «Окружающий мир» с наблюдениями и измерениями', () => {
+    const world = getTemplate('world')
+
+    expect(world?.title).toBe('Окружающий мир')
+    expect(world?.marks.length).toBeGreaterThan(0)
+    expect(world?.metrics.length).toBeGreaterThan(0)
+  })
+
   it('у измерений есть название и единица', () => {
     for (const template of TEMPLATES) {
       for (const metric of template.metrics) {
